@@ -5,3 +5,8 @@ edition = "2024"
 license = "MPL-2.0"
 
 [dependencies]
+accesskit = "0.25.1"
+horizon-theme = { path = "../horizon-theme" }
+parley = "0.12.0"
+taffy = "0.15.1"
+vello = "0.11.0"
