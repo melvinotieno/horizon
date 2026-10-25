@@ -12,21 +12,41 @@ pub struct Layer {
     pub source: String,
 }
 
+/// Every color of a particular color scheme, plus its elevation adjustments.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Colors {
     colors: HashMap<String, Rgba>,
 }
 
 impl Colors {
+    /// Returns the color for a given role, or a fallback if the role is not found.
+    #[track_caller]
+    pub fn color(&self, role: &str) -> Rgba {
+        lookup(&self.colors, "color", role, Rgba::new(1.0, 0.0, 1.0, 1.0))
+    }
+
+    /// Returns true if the color role exists in this color scheme.
     pub fn has(&self, role: &str) -> bool {
         self.colors.contains_key(role)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FontStyle {
+    pub size: f32,
+    pub line: f32,
+    pub weight: f32,
+    pub tracking: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tokens {
     pub light: Colors,
     pub dark: Colors,
+    pub font_family: String,
+    pub font_family_mono: String,
+    pub font_features: String,
+    font_styles: HashMap<String, FontStyle>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +94,18 @@ impl Tokens {
         Ok(tokens)
     }
 
+    /// Returns the font style for a given name, or a fallback if the name is not found.
+    #[track_caller]
+    pub fn font_style(&self, name: &str) -> FontStyle {
+        let fallback = FontStyle {
+            size: 14.0,
+            line: 20.0,
+            weight: 400.0,
+            tracking: 0.0,
+        };
+        lookup(&self.font_styles, "font style", name, fallback)
+    }
+
     fn load_with(layers: &[Layer]) -> Result<(Self, Vec<String>), Error> {
         let base: toml::Table = BUILTIN.parse().map_err(|e| Error(format!("{e}")))?;
 
@@ -110,6 +142,7 @@ impl Tokens {
         Ok((tokens, warnings))
     }
 
+    /// Loads a token set from a TOML table, returning an error if the table is invalid.
     fn from_table(root: &toml::Table) -> Result<Self, Error> {
         // Traverses a TOML table using a path of keys.
         let table = |path: &[&str]| -> Result<&toml::Table, Error> {
@@ -154,6 +187,7 @@ impl Tokens {
             Ok(Colors { colors })
         };
 
+        // Loads the light and dark color schemes.
         let (light, dark) = (scheme("light")?, scheme("dark")?);
         for role in light.colors.keys() {
             if !dark.has(role) {
@@ -163,10 +197,71 @@ impl Tokens {
             }
         }
 
-        Ok(Self { light, dark })
+        let typography = table(&["typography"])?;
+
+        // Resolves font details from the TOML table.
+        let font = |key: &str, default: &str| -> String {
+            typography
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or(default)
+                .to_string()
+        };
+
+        // Resolves font features from the TOML table.
+        let font_features = typography
+            .get("features")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|f| f.as_str())
+                    .map(|f| format!("\"{f}\" 1"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        // Loads font styles from the TOML table.
+        let mut font_styles = HashMap::new();
+        for (name, value) in table(&["typography", "style"])? {
+            let style = |k: &str| value.get(k).and_then(num).unwrap_or(0.0) as f32;
+            font_styles.insert(
+                name.clone(),
+                FontStyle {
+                    size: style("size"),
+                    line: style("line"),
+                    weight: style("weight"),
+                    tracking: style("tracking"),
+                },
+            );
+        }
+
+        Ok(Self {
+            light,
+            dark,
+            font_family: font("family", "Inter"),
+            font_family_mono: font("family_mono", "monospace"),
+            font_features,
+            font_styles,
+        })
     }
 }
 
+/// Looks up a value in a map by name, returning a fallback if the name is not found.
+#[track_caller]
+fn lookup<T: Copy>(map: &HashMap<String, T>, kind: &str, name: &str, fallback: T) -> T {
+    match map.get(name) {
+        Some(value) => *value,
+        None => {
+            // In debug builds, panic if the name is not found. This helps catch typos
+            // and other mistakes during development. In release builds, return the fallback
+            debug_assert!(false, "unknown {kind} {name:?} (not in tokens.toml)");
+            fallback
+        }
+    }
+}
+
+/// Reads a layer from a file, returning None if the file is not found.
 fn read_layer(path: &Path, warnings: &mut Vec<String>) -> Option<Layer> {
     match std::fs::read_to_string(path) {
         Ok(source) => Some(Layer {
@@ -181,6 +276,7 @@ fn read_layer(path: &Path, warnings: &mut Vec<String>) -> Option<Layer> {
     }
 }
 
+/// Merges the overlay table into the base table, recursively merging nested tables.
 fn merge(base: &mut toml::Table, overlay: toml::Table) {
     for (key, value) in overlay {
         match (base.get_mut(&key), value) {
@@ -190,6 +286,11 @@ fn merge(base: &mut toml::Table, overlay: toml::Table) {
             }
         }
     }
+}
+
+/// Converts a TOML value to a number, if possible.
+fn num(v: &toml::Value) -> Option<f64> {
+    v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
 }
 
 #[cfg(test)]
