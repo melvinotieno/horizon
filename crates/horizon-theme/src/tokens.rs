@@ -47,6 +47,7 @@ pub struct Tokens {
     pub font_family_mono: String,
     pub font_features: String,
     font_styles: HashMap<String, FontStyle>,
+    control_size: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +95,7 @@ impl Tokens {
         Ok(tokens)
     }
 
-    /// Returns the font style for a given name, or a fallback if the name is not found.
+    /// Returns the font style for a given name, or a fallback if not found.
     #[track_caller]
     pub fn font_style(&self, name: &str) -> FontStyle {
         let fallback = FontStyle {
@@ -104,6 +105,12 @@ impl Tokens {
             tracking: 0.0,
         };
         lookup(&self.font_styles, "font style", name, fallback)
+    }
+
+    /// Returns the control size for a given name, or a fallback if not found.
+    #[track_caller]
+    pub fn control_size(&self, name: &str) -> f64 {
+        lookup(&self.control_size, "control size", name, 32.0)
     }
 
     fn load_with(layers: &[Layer]) -> Result<(Self, Vec<String>), Error> {
@@ -154,6 +161,14 @@ impl Tokens {
                     .ok_or_else(|| Error(format!("missing [{}]", path.join("."))))?;
             }
             Ok(current)
+        };
+
+        // Loads a map of numbers from a TOML table.
+        let numbers = |path: &[&str]| -> Result<HashMap<String, f64>, Error> {
+            Ok(table(path)?
+                .iter()
+                .filter_map(|(k, v)| Some((k.clone(), num(v)?)))
+                .collect())
         };
 
         let palette = table(&["palette"])?;
@@ -243,6 +258,7 @@ impl Tokens {
             font_family_mono: font("family_mono", "monospace"),
             font_features,
             font_styles,
+            control_size: numbers(&["size", "control"])?,
         })
     }
 }
