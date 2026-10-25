@@ -5,16 +5,14 @@ use crate::{color::Rgba, paths::xdg};
 const BUILTIN: &str = include_str!("../assets/tokens.toml");
 const TOKEN_RELATIVE_PATH: &str = "horizon/tokens.toml";
 
+/// A partial tokens file to merge on top of the built-in tokens.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layer {
     pub label: String,
     pub source: String,
 }
 
-pub enum ColorScheme {
-    Light,
-    Dark,
-}
-
+#[derive(Debug, Clone, PartialEq)]
 pub struct Colors {
     colors: HashMap<String, Rgba>,
 }
@@ -25,12 +23,13 @@ impl Colors {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tokens {
     pub light: Colors,
     pub dark: Colors,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(pub String);
 
 impl std::fmt::Display for Error {
@@ -42,6 +41,16 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl Tokens {
+    /// Loads and compiles the built-in tokens with optional system and user layers.
+    ///
+    /// The layers are loaded in the following order:
+    /// 1. Built-in tokens (always present)
+    /// 2. `/usr/share/horizon/tokens.toml` (optional)
+    /// 3. `$XDG_CONFIG_HOME/horizon/tokens.toml` or `$HOME/.config/horizon/tokens.toml` (optional)
+    ///
+    /// Each layer overrides matching values from earlier layers.
+    ///
+    /// If a layer is not found or cannot be read, it will be ignored with a warning.
     pub fn load() -> Result<Self, Error> {
         let mut warnings = Vec::new();
 
@@ -180,5 +189,62 @@ fn merge(base: &mut toml::Table, overlay: toml::Table) {
                 base.insert(key, value);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge() {
+        let mut base: toml::Table = r#"
+            [a]
+            b = 1
+            [a.c]
+            d = 2
+        "#
+        .parse()
+        .unwrap();
+        let overlay: toml::Table = r#"
+            [a]
+            b = 3
+            [a.e]
+            f = 4
+        "#
+        .parse()
+        .unwrap();
+        merge(&mut base, overlay);
+        assert_eq!(
+            base.get("a")
+                .unwrap()
+                .get("b")
+                .unwrap()
+                .as_integer()
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            base.get("a")
+                .unwrap()
+                .get("c")
+                .unwrap()
+                .get("d")
+                .unwrap()
+                .as_integer()
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            base.get("a")
+                .unwrap()
+                .get("e")
+                .unwrap()
+                .get("f")
+                .unwrap()
+                .as_integer()
+                .unwrap(),
+            4
+        );
     }
 }
