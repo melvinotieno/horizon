@@ -1,8 +1,7 @@
 [package]
-name = "horizon_theme"
+name = "horizon-design"
 version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
 
 [dependencies]
-toml = "1.1.8"
